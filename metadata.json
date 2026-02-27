@@ -1,5 +1,5 @@
 {
   "name": "CodeRefine",
   "description": "Generative AI–Powered Code Review & Optimization Engine for identifying bugs, performance issues, and best-practice violations.",
-  "requestFramePermissions": []
+  "requestFramePermissions": ["microphone"]
 }
