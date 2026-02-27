@@ -148,7 +148,10 @@ export default function App() {
     if (textareaRef.current) {
       const lineHeight = 24; // leading-[24px]
       // Scroll to the line, centering it slightly if possible
-      textareaRef.current.scrollTop = Math.max(0, (line - 1) * lineHeight - 100);
+      textareaRef.current.scrollTo({
+        top: Math.max(0, (line - 1) * lineHeight - 100),
+        behavior: 'smooth'
+      });
       setHoveredLine(line);
       
       // Briefly highlight the line
@@ -287,6 +290,7 @@ export default function App() {
   const handleVibeCode = async () => {
     if (!vibeIntent.trim()) return;
     setIsVibeCoding(true);
+    setIsVibeModalOpen(false); // Close modal immediately
     setError(null);
     try {
       const res = await vibeCode(vibeIntent, files, model);
@@ -305,12 +309,10 @@ export default function App() {
       setFiles(newFiles);
       
       setActiveTab("vibe");
-      setIsVibeModalOpen(false);
       setVibeIntent("");
     } catch (err) {
       console.error(err);
       setError(err instanceof Error ? err.message : "An unexpected error occurred during Vibe Coding");
-      setIsVibeModalOpen(false);
     } finally {
       setIsVibeCoding(false);
     }
@@ -745,7 +747,7 @@ export default function App() {
 
           {/* Results Panel */}
           <div className="flex-1 flex flex-col bg-[#0D0D0E]/30 overflow-hidden">
-            {!result && !vibeResult && !isReviewing && !error && (
+            {!result && !vibeResult && !isReviewing && !isVibeCoding && !error && (
               <div className="flex-1 flex flex-col items-center justify-center p-12 text-center">
                 <div className="w-20 h-20 bg-emerald-500/5 rounded-full flex items-center justify-center mb-6 border border-emerald-500/10">
                   <Sparkles className="w-10 h-10 text-emerald-500/40" />
@@ -798,6 +800,27 @@ export default function App() {
               </div>
             )}
 
+            {isVibeCoding && (
+              <div className="flex-1 flex flex-col overflow-hidden">
+                <div className="p-6 border-bottom border-zinc-800 bg-[#0D0D0E]/50">
+                  <div className="flex items-center gap-2 text-purple-400 mb-6">
+                    <Sparkles className="w-5 h-5 animate-pulse" />
+                    <span className="font-bold">Vibe Coding in Progress...</span>
+                  </div>
+                  <div className="h-10 w-full bg-zinc-900/50 rounded-xl border border-zinc-800 animate-pulse" />
+                </div>
+                <div className="flex-1 p-6 space-y-6 overflow-hidden">
+                  <div className="h-40 w-full bg-purple-500/5 border border-purple-500/10 rounded-2xl animate-pulse" />
+                  <div className="h-32 w-full bg-zinc-900/30 border border-zinc-800 rounded-2xl animate-pulse" />
+                  <div className="h-32 w-full bg-zinc-900/30 border border-zinc-800 rounded-2xl animate-pulse" />
+                </div>
+                <div className="p-8 text-center">
+                  <RefreshCw className="w-6 h-6 text-purple-500 animate-spin mx-auto mb-4" />
+                  <p className="text-sm text-zinc-500 font-medium">AI is analyzing your workspace and refactoring code...</p>
+                </div>
+              </div>
+            )}
+
             {error && (
               <div className="flex-1 flex flex-col items-center justify-center p-12 text-center">
                 <div className="w-20 h-20 bg-red-500/5 rounded-full flex items-center justify-center mb-6 border border-red-500/10">
@@ -829,7 +852,7 @@ export default function App() {
               </div>
             )}
 
-            {(result || vibeResult) && !isReviewing && (
+            {(result || vibeResult) && !isReviewing && !isVibeCoding && (
               <div className="flex-1 flex flex-col overflow-hidden">
                 {/* Result Header */}
                 <div className="p-6 border-bottom border-zinc-800 bg-[#0D0D0E]/50">
