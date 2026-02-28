@@ -32,7 +32,8 @@ import {
   Plus,
   FolderTree,
   Network,
-  Settings
+  Settings,
+  History
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import ReactMarkdown from "react-markdown";
@@ -106,6 +107,9 @@ export default function App() {
   const [verbosity, setVerbosity] = useState<VerbosityLevel>("normal");
   const [tone, setTone] = useState<ToneStyle>("professional");
   const [showSettings, setShowSettings] = useState(false);
+  const [showHistory, setShowHistory] = useState(false);
+  const [historyData, setHistoryData] = useState<any[]>([]);
+  const [isLoadingHistory, setIsLoadingHistory] = useState(false);
   const [activeTab, setActiveTab] = useState<"issues" | "optimized" | "explanation" | "documentation" | "chat">("issues");
   const [hoveredLine, setHoveredLine] = useState<number | null>(null);
   
@@ -148,6 +152,19 @@ export default function App() {
       
       // Briefly highlight the line
       setTimeout(() => setHoveredLine(null), 2000);
+    }
+  };
+
+  const loadHistory = async () => {
+    setIsLoadingHistory(true);
+    try {
+      const res = await fetch('/api/history');
+      const data = await res.json();
+      setHistoryData(data);
+    } catch (e) {
+      console.error("Failed to load history", e);
+    } finally {
+      setIsLoadingHistory(false);
     }
   };
 
@@ -528,6 +545,14 @@ export default function App() {
               <option value="github-copilot">GitHub Copilot</option>
             </select>
           </div>
+
+          <button
+            onClick={() => { setShowHistory(true); loadHistory(); }}
+            className="p-2 rounded-lg transition-all bg-zinc-900 text-zinc-400 border border-zinc-800 hover:text-white"
+            title="History"
+          >
+            <History className="w-4 h-4" />
+          </button>
 
           <button
             onClick={() => setShowSettings(true)}
@@ -1106,6 +1131,87 @@ export default function App() {
                 >
                   Save & Close
                 </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* History Modal */}
+      <AnimatePresence>
+        {showHistory && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
+          >
+            <motion.div 
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="bg-zinc-900 border border-zinc-800 rounded-2xl w-full max-w-4xl max-h-[85vh] overflow-hidden shadow-2xl flex flex-col"
+            >
+              <div className="p-4 border-b border-zinc-800 flex justify-between items-center bg-black/20">
+                <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                  <History className="w-5 h-5 text-emerald-400" />
+                  Review History
+                </h3>
+                <button onClick={() => setShowHistory(false)} className="text-zinc-500 hover:text-white">
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+              
+              <div className="flex-1 overflow-y-auto p-6 custom-scrollbar">
+                {isLoadingHistory ? (
+                  <div className="flex justify-center items-center h-40">
+                    <RefreshCw className="w-6 h-6 text-emerald-500 animate-spin" />
+                  </div>
+                ) : historyData.length === 0 ? (
+                  <div className="text-center text-zinc-500 py-12">
+                    <History className="w-12 h-12 mx-auto mb-4 opacity-20" />
+                    <p>No history found yet.</p>
+                  </div>
+                ) : (
+                  <div className="space-y-6">
+                    {historyData.map((item) => (
+                      <div key={item.id} className="bg-black/30 border border-zinc-800 rounded-xl overflow-hidden">
+                        <div className="bg-zinc-800/50 px-4 py-3 border-b border-zinc-800 flex justify-between items-center">
+                          <div className="flex items-center gap-3">
+                            <span className="text-sm font-medium text-zinc-300">
+                              {new Date(item.timestamp).toLocaleString()}
+                            </span>
+                            <span className="text-xs font-mono bg-zinc-900 border border-zinc-700 px-2 py-1 rounded text-emerald-400">
+                              {item.language}
+                            </span>
+                          </div>
+                          <div className="flex gap-2">
+                            <span className="text-[10px] uppercase tracking-wider font-bold text-zinc-500 bg-zinc-900 px-2 py-1 rounded">
+                              O({item.timeComplexity}) Time
+                            </span>
+                            <span className="text-[10px] uppercase tracking-wider font-bold text-zinc-500 bg-zinc-900 px-2 py-1 rounded">
+                              O({item.spaceComplexity}) Space
+                            </span>
+                          </div>
+                        </div>
+                        <div className="grid grid-cols-1 md:grid-cols-2 divide-y md:divide-y-0 md:divide-x divide-zinc-800">
+                          <div className="p-4">
+                            <div className="text-xs font-bold text-zinc-500 uppercase mb-2">Original Code</div>
+                            <pre className="text-xs bg-zinc-950/50 p-3 rounded-lg h-48 overflow-auto custom-scrollbar text-zinc-400 font-mono">
+                              {item.originalCode}
+                            </pre>
+                          </div>
+                          <div className="p-4">
+                            <div className="text-xs font-bold text-emerald-500/70 uppercase mb-2">Improved Code</div>
+                            <pre className="text-xs bg-emerald-950/10 p-3 rounded-lg h-48 overflow-auto custom-scrollbar text-emerald-400/80 font-mono">
+                              {item.improvedCode}
+                            </pre>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             </motion.div>
           </motion.div>
