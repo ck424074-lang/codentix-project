@@ -49,15 +49,13 @@ import "prismjs/components/prism-java";
 import { 
   reviewCode, 
   chatWithCode,
-  vibeCode,
   type CodeReviewResult, 
   type CodeIssue, 
   type ReviewMode, 
   type ImplementationStyle,
   type ModelType,
   type VerbosityLevel,
-  type ToneStyle,
-  type VibeCodingResult
+  type ToneStyle
 } from "./lib/gemini.ts";
 import { cn } from "./lib/utils.ts";
 
@@ -108,14 +106,8 @@ export default function App() {
   const [verbosity, setVerbosity] = useState<VerbosityLevel>("normal");
   const [tone, setTone] = useState<ToneStyle>("professional");
   const [showSettings, setShowSettings] = useState(false);
-  const [activeTab, setActiveTab] = useState<"issues" | "optimized" | "explanation" | "documentation" | "chat" | "vibe">("issues");
+  const [activeTab, setActiveTab] = useState<"issues" | "optimized" | "explanation" | "documentation" | "chat">("issues");
   const [hoveredLine, setHoveredLine] = useState<number | null>(null);
-  
-  // Vibe Coding State
-  const [isVibeModalOpen, setIsVibeModalOpen] = useState(false);
-  const [vibeIntent, setVibeIntent] = useState("");
-  const [isVibeCoding, setIsVibeCoding] = useState(false);
-  const [vibeResult, setVibeResult] = useState<VibeCodingResult | null>(null);
   
   // Chat State
   const [chatMessages, setChatMessages] = useState<{ role: "user" | "model", text: string }[]>([]);
@@ -168,6 +160,23 @@ export default function App() {
       const res = await reviewCode(code, language, mode, targetLanguage, style, model, errorLog, houseStyle, verbosity, tone);
       setResult(res);
       setActiveTab("issues");
+
+      // Save to history
+      try {
+        await fetch('/api/history', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            originalCode: code,
+            improvedCode: res.optimizedCode,
+            language: res.detectedLanguage || language,
+            complexity: res.complexity
+          })
+        });
+      } catch (e) {
+        console.error("Failed to save history:", e);
+      }
+
     } catch (err) {
       console.error(err);
       setError(err instanceof Error ? err.message : "An unexpected error occurred");
@@ -225,7 +234,7 @@ export default function App() {
     }
   };
 
-  const toggleListening = () => {
+  const toggleListening = async () => {
     if (isListening) {
       recognitionRef.current?.stop();
       setIsListening(false);
@@ -235,6 +244,21 @@ export default function App() {
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     if (!SpeechRecognition) {
       alert("Speech recognition is not supported in this browser.");
+      return;
+    }
+
+    try {
+      // Request microphone permission first, which works better in cross-origin iframes
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      // We don't need to keep the stream, just needed the permission
+      stream.getTracks().forEach(track => track.stop());
+    } catch (err: any) {
+      console.error("Microphone permission denied:", err);
+      if (err.name === 'NotFoundError' || err.message?.includes('device not found')) {
+        alert("No microphone found. Please ensure a microphone is connected to your device.");
+      } else {
+        alert("Microphone access is denied. Please allow microphone access in your browser settings to use voice commands.");
+      }
       return;
     }
 
@@ -248,7 +272,7 @@ export default function App() {
     recognition.onerror = (event: any) => {
       console.error("Speech recognition error", event.error);
       if (event.error === 'not-allowed') {
-        alert("Microphone access is denied. Please allow microphone access in your browser settings to use voice commands.");
+        alert("Microphone access is denied by Speech Recognition. Please allow microphone access in your browser settings.");
       }
       setIsListening(false);
     };
@@ -257,8 +281,6 @@ export default function App() {
       const transcript = event.results[0][0].transcript;
       if (transcript.toLowerCase().includes("refactor") || transcript.toLowerCase().includes("review")) {
         handleReview();
-      } else if (transcript.toLowerCase().includes("vibe")) {
-        setIsVibeModalOpen(true);
       } else {
         if (activeTab === "chat") {
           setChatInput(transcript);
@@ -284,37 +306,6 @@ export default function App() {
     setFiles(newFiles);
     if (activeFileIndex >= newFiles.length) {
       setActiveFileIndex(newFiles.length - 1);
-    }
-  };
-
-  const handleVibeCode = async () => {
-    if (!vibeIntent.trim()) return;
-    setIsVibeCoding(true);
-    setIsVibeModalOpen(false); // Close modal immediately
-    setError(null);
-    try {
-      const res = await vibeCode(vibeIntent, files, model);
-      setVibeResult(res);
-      
-      // Update files with modified content
-      const newFiles = [...files];
-      res.modifiedFiles.forEach(modFile => {
-        const existingIndex = newFiles.findIndex(f => f.name === modFile.name);
-        if (existingIndex >= 0) {
-          newFiles[existingIndex].content = modFile.content;
-        } else {
-          newFiles.push({ name: modFile.name, content: modFile.content });
-        }
-      });
-      setFiles(newFiles);
-      
-      setActiveTab("vibe");
-      setVibeIntent("");
-    } catch (err) {
-      console.error(err);
-      setError(err instanceof Error ? err.message : "An unexpected error occurred during Vibe Coding");
-    } finally {
-      setIsVibeCoding(false);
     }
   };
 
@@ -398,13 +389,12 @@ export default function App() {
             </motion.div>
           </div>
 
-          {/* Features Grid */}
-          <div id="features" className="mt-40 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            <LandingFeatureCard 
-              icon={<Split className="w-6 h-6 text-blue-400" />}
-              title="Cross-Language Conversion"
-              description="Instantly translate your code between Python, JavaScript, Java, C++, and more while maintaining optimal performance."
-            />
+            <div id="features" className="mt-40 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              <LandingFeatureCard 
+                icon={<Split className="w-6 h-6 text-blue-400" />}
+                title="Cross-Language Conversion"
+                description="Instantly translate your code between Python, JavaScript, Java, C++, and more while maintaining optimal performance."
+              />
             <LandingFeatureCard 
               icon={<BarChart3 className="w-6 h-6 text-purple-400" />}
               title="Complexity Analysis"
@@ -534,6 +524,8 @@ export default function App() {
               <option value="gemini-3.1-pro-preview">Gemini 3.1 Pro</option>
               <option value="claude-4">Claude 4 (Fast)</option>
               <option value="gpt-5">GPT 5 (Reasoning)</option>
+              <option value="microsoft-copilot">Microsoft Copilot</option>
+              <option value="github-copilot">GitHub Copilot</option>
             </select>
           </div>
 
@@ -556,14 +548,6 @@ export default function App() {
             title={isListening ? "Stop Listening" : "Voice Commands"}
           >
             {isListening ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
-          </button>
-
-          <button
-            onClick={() => setIsVibeModalOpen(true)}
-            className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all bg-purple-600 hover:bg-purple-500 text-white shadow-lg shadow-purple-900/20 active:scale-95"
-          >
-            <Sparkles className="w-4 h-4" />
-            Vibe Code
           </button>
 
           <button
@@ -747,7 +731,7 @@ export default function App() {
 
           {/* Results Panel */}
           <div className="flex-1 flex flex-col bg-[#0D0D0E]/30 overflow-hidden">
-            {!result && !vibeResult && !isReviewing && !isVibeCoding && !error && (
+            {!result && !isReviewing && !error && activeTab !== "chat" && (
               <div className="flex-1 flex flex-col items-center justify-center p-12 text-center">
                 <div className="w-20 h-20 bg-emerald-500/5 rounded-full flex items-center justify-center mb-6 border border-emerald-500/10">
                   <Sparkles className="w-10 h-10 text-emerald-500/40" />
@@ -758,10 +742,17 @@ export default function App() {
                 </p>
                 <div className="grid grid-cols-2 gap-4 max-w-md w-full">
                   <FeatureCard icon={Zap} title="Optimization" desc="Improve time complexity" />
-                  <FeatureCard icon={Network} title="Vibe Coding" desc="Cross-file refactoring" />
                   <FeatureCard icon={BarChart3} title="Complexity" desc="Time & Space analysis" />
                   <FeatureCard icon={FileText} title="Documentation" desc="Auto-generate docstrings" />
+                  <FeatureCard icon={ShieldAlert} title="Security" desc="Find vulnerabilities" />
                 </div>
+                <button
+                  onClick={() => setActiveTab("chat")}
+                  className="mt-8 px-6 py-3 bg-zinc-900 hover:bg-zinc-800 text-white font-bold rounded-xl border border-zinc-800 flex items-center gap-2 transition-all"
+                >
+                  <MessageSquare className="w-5 h-5" />
+                  Chat with Code
+                </button>
               </div>
             )}
 
@@ -800,27 +791,6 @@ export default function App() {
               </div>
             )}
 
-            {isVibeCoding && (
-              <div className="flex-1 flex flex-col overflow-hidden">
-                <div className="p-6 border-bottom border-zinc-800 bg-[#0D0D0E]/50">
-                  <div className="flex items-center gap-2 text-purple-400 mb-6">
-                    <Sparkles className="w-5 h-5 animate-pulse" />
-                    <span className="font-bold">Vibe Coding in Progress...</span>
-                  </div>
-                  <div className="h-10 w-full bg-zinc-900/50 rounded-xl border border-zinc-800 animate-pulse" />
-                </div>
-                <div className="flex-1 p-6 space-y-6 overflow-hidden">
-                  <div className="h-40 w-full bg-purple-500/5 border border-purple-500/10 rounded-2xl animate-pulse" />
-                  <div className="h-32 w-full bg-zinc-900/30 border border-zinc-800 rounded-2xl animate-pulse" />
-                  <div className="h-32 w-full bg-zinc-900/30 border border-zinc-800 rounded-2xl animate-pulse" />
-                </div>
-                <div className="p-8 text-center">
-                  <RefreshCw className="w-6 h-6 text-purple-500 animate-spin mx-auto mb-4" />
-                  <p className="text-sm text-zinc-500 font-medium">AI is analyzing your workspace and refactoring code...</p>
-                </div>
-              </div>
-            )}
-
             {error && (
               <div className="flex-1 flex flex-col items-center justify-center p-12 text-center">
                 <div className="w-20 h-20 bg-red-500/5 rounded-full flex items-center justify-center mb-6 border border-red-500/10">
@@ -852,126 +822,66 @@ export default function App() {
               </div>
             )}
 
-            {(result || vibeResult) && !isReviewing && !isVibeCoding && (
+            {result && !isReviewing && (
               <div className="flex-1 flex flex-col overflow-hidden">
                 {/* Result Header */}
                 <div className="p-6 border-bottom border-zinc-800 bg-[#0D0D0E]/50">
                   <div className="flex items-start justify-between mb-6">
-                    {result ? (
-                      <>
-                        <div className="flex gap-6">
-                          <ScoreDisplay label="Quality" score={result.detailedScores.quality} />
-                          <ScoreDisplay label="Readability" score={result.detailedScores.readability} />
-                          <ScoreDisplay label="Optimization" score={result.detailedScores.optimization} />
-                          <ScoreDisplay label="Security" score={result.detailedScores.security} />
-                          <ScoreDisplay label="Tech Debt" score={result.detailedScores.technicalDebt} />
-                          <ScoreDisplay label="Style" score={result.detailedScores.styleConsistency} />
-                        </div>
-                        <div className="flex flex-col items-end">
-                          <div className="text-[10px] text-zinc-500 uppercase tracking-widest font-bold mb-1">Complexity</div>
-                          <div className="flex gap-3">
-                            <ComplexityBadge label="Time" value={result.complexity.time} />
-                            <ComplexityBadge label="Space" value={result.complexity.space} />
-                            <ComplexityBadge label="Cyclomatic" value={result.complexity.cyclomatic.toString()} />
-                          </div>
-                        </div>
-                      </>
-                    ) : (
-                      <div className="flex items-center gap-2 text-purple-400">
-                        <Sparkles className="w-5 h-5" />
-                        <span className="font-bold">Vibe Coding Results</span>
+                    <>
+                      <div className="flex gap-6">
+                        <ScoreDisplay label="Quality" score={result.detailedScores.quality} />
+                        <ScoreDisplay label="Readability" score={result.detailedScores.readability} />
+                        <ScoreDisplay label="Optimization" score={result.detailedScores.optimization} />
+                        <ScoreDisplay label="Security" score={result.detailedScores.security} />
+                        <ScoreDisplay label="Tech Debt" score={result.detailedScores.technicalDebt} />
+                        <ScoreDisplay label="Style" score={result.detailedScores.styleConsistency} />
                       </div>
-                    )}
+                      <div className="flex flex-col items-end">
+                        <div className="text-[10px] text-zinc-500 uppercase tracking-widest font-bold mb-1">Complexity</div>
+                        <div className="flex gap-3">
+                          <ComplexityBadge label="Time" value={result.complexity.time} />
+                          <ComplexityBadge label="Space" value={result.complexity.space} />
+                          <ComplexityBadge label="Cyclomatic" value={result.complexity.cyclomatic.toString()} />
+                        </div>
+                      </div>
+                    </>
                   </div>
 
                   <div className="flex gap-1 p-1 bg-zinc-900/50 rounded-xl border border-zinc-800">
-                    {result && (
-                      <>
-                        <TabButton 
-                          active={activeTab === "issues"} 
-                          onClick={() => setActiveTab("issues")}
-                          label="Issues"
-                          count={result.issues.length}
-                        />
-                        <TabButton 
-                          active={activeTab === "optimized"} 
-                          onClick={() => setActiveTab("optimized")}
-                          label={targetLanguage !== "none" ? "Converted" : "Optimized"}
-                        />
-                        <TabButton 
-                          active={activeTab === "explanation"} 
-                          onClick={() => setActiveTab("explanation")}
-                          label="Explanation"
-                        />
-                        <TabButton 
-                          active={activeTab === "documentation"} 
-                          onClick={() => setActiveTab("documentation")}
-                          label="Docs"
-                        />
-                      </>
-                    )}
+                    <>
+                      <TabButton 
+                        active={activeTab === "issues"} 
+                        onClick={() => setActiveTab("issues")}
+                        label="Issues"
+                        count={result.issues.length}
+                      />
+                      <TabButton 
+                        active={activeTab === "optimized"} 
+                        onClick={() => setActiveTab("optimized")}
+                        label={targetLanguage !== "none" ? "Converted" : "Optimized"}
+                      />
+                      <TabButton 
+                        active={activeTab === "explanation"} 
+                        onClick={() => setActiveTab("explanation")}
+                        label="Explanation"
+                      />
+                      <TabButton 
+                        active={activeTab === "documentation"} 
+                        onClick={() => setActiveTab("documentation")}
+                        label="Docs"
+                      />
+                    </>
                     <TabButton 
                       active={activeTab === "chat"} 
                       onClick={() => setActiveTab("chat")}
                       label="Chat"
                     />
-                    {vibeResult && (
-                      <TabButton 
-                        active={activeTab === "vibe"} 
-                        onClick={() => setActiveTab("vibe")}
-                        label="Vibe Results"
-                      />
-                    )}
                   </div>
                 </div>
 
                 {/* Result Content */}
                 <div className="flex-1 overflow-y-auto p-6 custom-scrollbar">
                   <AnimatePresence mode="wait">
-                    {activeTab === "vibe" && vibeResult && (
-                      <motion.div 
-                        key="vibe"
-                        initial={{ opacity: 0, y: 10 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        exit={{ opacity: 0, y: -10 }}
-                        className="space-y-6"
-                      >
-                        <div className="bg-purple-500/10 border border-purple-500/20 rounded-2xl p-6">
-                          <h3 className="text-purple-400 font-bold mb-4 flex items-center gap-2">
-                            <Network className="w-5 h-5" /> Dependency Graph
-                          </h3>
-                          <div className="markdown-body text-sm">
-                            <ReactMarkdown>{vibeResult.dependencyGraph}</ReactMarkdown>
-                          </div>
-                        </div>
-                        
-                        <div className="bg-zinc-900/50 border border-zinc-800 rounded-2xl p-6">
-                          <h3 className="text-zinc-200 font-bold mb-4 flex items-center gap-2">
-                            <Sparkles className="w-5 h-5 text-emerald-400" /> Refactoring Explanation
-                          </h3>
-                          <div className="markdown-body text-sm">
-                            <ReactMarkdown>{vibeResult.explanation}</ReactMarkdown>
-                          </div>
-                        </div>
-
-                        <div>
-                          <h3 className="text-zinc-400 font-bold mb-4 text-sm uppercase tracking-wider">Modified Files ({vibeResult.modifiedFiles.length})</h3>
-                          <div className="space-y-4">
-                            {vibeResult.modifiedFiles.map((f, i) => (
-                              <div key={i} className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden">
-                                <div className="bg-zinc-800/50 px-4 py-2 border-b border-zinc-800 text-xs font-mono text-zinc-300">
-                                  {f.name}
-                                </div>
-                                <pre className="p-4 text-xs overflow-x-auto">
-                                  <code className="language-javascript">{f.content}</code>
-                                </pre>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      </motion.div>
-                    )}
-
                     {activeTab === "chat" && (
                       <motion.div 
                         key="chat"
@@ -1195,57 +1105,6 @@ export default function App() {
                   className="px-6 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-bold rounded-lg transition-all"
                 >
                   Save & Close
-                </button>
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* Vibe Coding Modal */}
-      <AnimatePresence>
-        {isVibeModalOpen && (
-          <motion.div 
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
-          >
-            <motion.div 
-              initial={{ scale: 0.95, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.95, opacity: 0 }}
-              className="bg-zinc-900 border border-zinc-800 rounded-2xl w-full max-w-lg overflow-hidden shadow-2xl"
-            >
-              <div className="p-4 border-b border-zinc-800 flex justify-between items-center">
-                <h3 className="text-lg font-bold text-white flex items-center gap-2">
-                  <Sparkles className="w-5 h-5 text-purple-400" />
-                  Vibe Coding
-                </h3>
-                <button onClick={() => setIsVibeModalOpen(false)} className="text-zinc-500 hover:text-white">
-                  <X className="w-5 h-5" />
-                </button>
-              </div>
-              <div className="p-6">
-                <p className="text-sm text-zinc-400 mb-4">
-                  Describe your high-level intent. The AI will analyze your entire workspace, map dependencies, and perform cross-file refactoring automatically.
-                </p>
-                <textarea
-                  value={vibeIntent}
-                  onChange={(e) => setVibeIntent(e.target.value)}
-                  placeholder="e.g., Refactor the authentication flow to use the new OIDC provider..."
-                  className="w-full bg-black/50 border border-zinc-800 rounded-xl p-4 text-sm text-zinc-300 min-h-[120px] outline-none focus:border-purple-500/50 transition-colors resize-none"
-                />
-              </div>
-              <div className="p-4 border-t border-zinc-800 flex justify-end gap-3 bg-black/20">
-                <button onClick={() => setIsVibeModalOpen(false)} className="px-4 py-2 text-sm font-medium text-zinc-400 hover:text-white">Cancel</button>
-                <button 
-                  onClick={handleVibeCode}
-                  disabled={isVibeCoding || !vibeIntent.trim()}
-                  className="px-6 py-2 bg-purple-600 hover:bg-purple-500 text-white text-sm font-bold rounded-lg flex items-center gap-2 disabled:opacity-50 transition-all"
-                >
-                  {isVibeCoding ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
-                  {isVibeCoding ? "Analyzing Workspace..." : "Execute Intent"}
                 </button>
               </div>
             </motion.div>

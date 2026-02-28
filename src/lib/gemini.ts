@@ -36,15 +36,9 @@ export interface CodeReviewResult {
   detectedLanguage: string;
 }
 
-export interface VibeCodingResult {
-  explanation: string;
-  modifiedFiles: { name: string; content: string }[];
-  dependencyGraph: string;
-}
-
 export type ReviewMode = "student" | "interview" | "industry";
 export type ImplementationStyle = "default" | "functional" | "recursive" | "flat";
-export type ModelType = "gemini-3-flash-preview" | "gemini-3.1-pro-preview" | "claude-4" | "gpt-5";
+export type ModelType = "gemini-3-flash-preview" | "gemini-3.1-pro-preview" | "claude-4" | "gpt-5" | "microsoft-copilot" | "github-copilot";
 export type VerbosityLevel = "concise" | "normal" | "detailed";
 export type ToneStyle = "professional" | "casual" | "encouraging";
 
@@ -52,6 +46,8 @@ function mapModel(model: ModelType): string {
   switch (model) {
     case "claude-4": return "gemini-3-flash-preview";
     case "gpt-5": return "gemini-3.1-pro-preview";
+    case "microsoft-copilot": return "gemini-3.1-pro-preview";
+    case "github-copilot": return "gemini-3.1-pro-preview";
     default: return model;
   }
 }
@@ -111,16 +107,38 @@ export async function reviewCode(
       1. ${isAuto ? "Identify the source programming language." : ""}
       2. Identify bugs, performance issues, best-practice violations, and security vulnerabilities (e.g., SQL injection, XSS, hardcoded secrets) in the original code.
       3. Provide the best overall optimized/corrected code in the \`optimizedCode\` field. Ensure it strictly adheres to the HOUSE STYLE GUIDELINES if provided.
-      4. In the \`explanation\` field, you MUST follow this exact structure:
-         - Phase 1: Mandatory Correction (P0)
-           - Provide a 1-sentence "Root Cause Analysis" explaining why it failed (based on the error log or obvious bugs).
-           - Provide a block titled "### 🛠️ CORRECTED CODE" containing a hotfix that solves the bug while changing as little of the original logic as possible.
-         - Phase 2: Triple Optimization (P1)
-           - Provide a block titled "### 🚀 OPTIMIZED VERSIONS" with exactly three variants:
-             1. **Option 1: Clean/Readable** (Focus on naming, comments, and simplicity).
-             2. **Option 2: High Performance** (Focus on time complexity O(n) and memory).
-             3. **Option 3: Modern Agentic** (Focus on 2026 best practices like immutability or specific framework hooks).
-      5. Generate professional documentation (Docstrings/README format) for the ${isConversion ? targetLanguage : "optimized"} code. **Use structured Markdown with clear sections.**
+      4. In the \`explanation\` field, you MUST follow this exact structure using multi-line Markdown:
+         
+         ### 🔍 Phase 1: Mandatory Correction (P0)
+         **Root Cause Analysis:**
+         [Provide a detailed, multi-line explanation of why the code failed or is suboptimal.]
+         
+         **### 🛠️ CORRECTED CODE**
+         \`\`\`${targetLanguage && targetLanguage !== "none" ? targetLanguage : language}
+         [Provide the hotfix code here]
+         \`\`\`
+         
+         ### 🚀 Phase 2: Triple Optimization (P1)
+         
+         #### Option 1: Clean/Readable
+         [Explain the approach]
+         \`\`\`${targetLanguage && targetLanguage !== "none" ? targetLanguage : language}
+         [Code for Option 1]
+         \`\`\`
+         
+         #### Option 2: High Performance
+         [Explain the approach]
+         \`\`\`${targetLanguage && targetLanguage !== "none" ? targetLanguage : language}
+         [Code for Option 2]
+         \`\`\`
+         
+         #### Option 3: Modern Agentic
+         [Explain the approach]
+         \`\`\`${targetLanguage && targetLanguage !== "none" ? targetLanguage : language}
+         [Code for Option 3]
+         \`\`\`
+         
+      5. Generate professional documentation (Docstrings/README format) for the ${isConversion ? targetLanguage : "optimized"} code in the \`documentation\` field. **Use structured multi-line Markdown with clear sections (e.g., Overview, Parameters, Returns, Examples).**
       6. Analyze Time, Space, and Cyclomatic complexity of the ${isConversion ? "converted" : "optimized"} code.
       7. Provide detailed scores (0-10) for Quality, Readability, Optimization, Security, Technical Debt (10 = no debt, 0 = high debt), and Style Consistency.
 
@@ -225,27 +243,13 @@ export async function chatWithCode(
   const chat = ai.chats.create({
     model: actualModel,
     config: {
-      systemInstruction: `You are a dual-stage AI Refinement Agent. Your goal is to process a code snippet AND its corresponding error/bug log to produce exactly two distinct sections: CORRECTION and OPTIMIZATION.
+      systemInstruction: `You are a helpful AI coding assistant. Your goal is to answer the user's questions about the provided code snippet.
       
-      Phase 1: Mandatory Correction (P0)
-      1. First, analyze the provided error_log (if any) or the user's issue.
-      2. Identify the single line or block causing the failure.
-      3. Provide a block titled "### 🛠️ CORRECTED CODE" (hotfix, minimal changes).
-      4. Provide a 1-sentence "Root Cause Analysis".
+      Provide clear, concise, and accurate answers. If the user asks for explanations, explain the logic step-by-step. If they ask for improvements, suggest them.
       
-      Phase 2: Triple Optimization (P1)
-      Only after providing the correction, generate "### 🚀 OPTIMIZED VERSIONS" with exactly three variants:
-      1. Option 1: Clean/Readable
-      2. Option 2: High Performance
-      3. Option 3: Modern Agentic
+      ${errorLog ? `The user also provided the following ERROR/BUG LOG for context:\n${errorLog}\n` : ""}
       
-      Guardrails:
-      - NEVER skip the Correction phase.
-      - If no error log is provided, ask for it before optimizing.
-      
-      ${errorLog ? `ERROR/BUG LOG:\n${errorLog}\n` : ""}
-      
-      CONTEXT CODE:
+      CURRENT CODE IN EDITOR:
       \`\`\`
       ${code}
       \`\`\``,
@@ -255,71 +259,4 @@ export async function chatWithCode(
 
   const response = await chat.sendMessage({ message: question });
   return response.text || "I'm sorry, I couldn't generate a response.";
-}
-
-export async function vibeCode(
-  intent: string,
-  files: { name: string; content: string }[],
-  model: ModelType = "gemini-3.1-pro-preview"
-): Promise<VibeCodingResult> {
-  if (!apiKey) throw new Error("GEMINI_API_KEY is not set");
-  const ai = new GoogleGenAI({ apiKey });
-  const actualModel = mapModel(model);
-
-  const filesContext = files.map(f => `--- FILE: ${f.name} ---\n\`\`\`\n${f.content}\n\`\`\``).join("\n\n");
-
-  try {
-    const response = await ai.models.generateContent({
-      model: actualModel,
-      contents: `You are a Repository-Wide Contextual Intelligence Agent.
-      Your goal is to perform "Vibe Coding" and Cross-File Refactoring based on the user's high-level intent.
-      
-      USER INTENT: "${intent}"
-      
-      WORKSPACE FILES:
-      ${filesContext}
-      
-      Tasks:
-      1. Analyze the relationships between the provided files (Graph-Based Code Mapping).
-      2. Identify which files need to be modified to fulfill the user's intent.
-      3. Perform the necessary cross-file refactoring, ensuring type safety and consistency across the project.
-      4. Return a JSON object containing:
-         - \`explanation\`: A detailed explanation of the changes made and how they propagate across the files.
-         - \`dependencyGraph\`: A markdown representation (e.g., a bulleted list or mermaid.js syntax if applicable) of the dependency graph between the files.
-         - \`modifiedFiles\`: An array of objects, each containing the \`name\` of the modified file and its new \`content\`. Only include files that were actually changed or newly created.
-
-      CRITICAL: You MUST return valid JSON matching the schema.`,
-      config: {
-        responseMimeType: "application/json",
-        thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            explanation: { type: Type.STRING },
-            dependencyGraph: { type: Type.STRING },
-            modifiedFiles: {
-              type: Type.ARRAY,
-              items: {
-                type: Type.OBJECT,
-                properties: {
-                  name: { type: Type.STRING },
-                  content: { type: Type.STRING },
-                },
-                required: ["name", "content"],
-              },
-            },
-          },
-          required: ["explanation", "dependencyGraph", "modifiedFiles"],
-        },
-      },
-    });
-
-    const text = response.text;
-    if (!text) throw new Error("Empty response from AI.");
-    
-    return JSON.parse(text) as VibeCodingResult;
-  } catch (apiError: any) {
-    console.error("Vibe Coding Error:", apiError);
-    throw new Error(apiError.message || "An error occurred during Vibe Coding.");
-  }
 }
